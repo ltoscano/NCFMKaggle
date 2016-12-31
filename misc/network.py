@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np 
 
+OP_SEED = 42 
+
 class Network(object):
     def __init__(self):
         self.layers = {}
@@ -35,7 +37,7 @@ class Network(object):
             shape = bottom.get_shape().as_list()
             c_i = shape[-1]
 
-            weights = self.make_var("weights", [k_h, k_w, c_i, c_o], tf.truncated_normal_initializer(0, stddev=.02), train)
+            weights = self.make_var("weights", [k_h, k_w, c_i, c_o], tf.truncated_normal_initializer(0, stddev=.02, seed=OP_SEED), train)
             biases = self.make_var("biases", [c_o], tf.constant_initializer(0.0), train)
 
             conv = tf.nn.conv2d(bottom, weights, [1, s_h, s_w, 1], padding="SAME")
@@ -56,7 +58,7 @@ class Network(object):
                  in_dim *= d
             x = tf.reshape(bottom, [-1, in_dim])
 
-            weights = self.make_var("weights", [in_dim, out_dim], tf.truncated_normal_initializer(0, stddev=.02), train)
+            weights = self.make_var("weights", [in_dim, out_dim], tf.truncated_normal_initializer(0, stddev=.02, seed=OP_SEED), train)
             biases = self.make_var("biases", [out_dim], tf.constant_initializer(0.0), train)
 
             return tf.nn.bias_add(tf.matmul(x, weights), biases)
@@ -67,11 +69,7 @@ class Network(object):
 
     @layer
     def dropout(self, bottom, keep_prob, name):
-        return tf.nn.dropout(bottom, keep_prob, name=name)
-
-    @layer
-    def softmax(self, bottom, name):
-        return tf.nn.softmax(bottom, name=name)
+        return tf.nn.dropout(bottom, keep_prob, name=name, seed=OP_SEED)
 
 if __name__ == '__main__':
 
