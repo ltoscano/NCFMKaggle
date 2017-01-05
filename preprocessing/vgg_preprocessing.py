@@ -43,7 +43,7 @@ _G_MEAN = 116.78
 _B_MEAN = 103.94
 
 _RESIZE_SIDE_MIN = 256
-_RESIZE_SIDE_MAX = 512
+_RESIZE_SIDE_MAX = 256
 
 
 def _crop(image, offset_height, offset_width, crop_height, crop_width):
@@ -318,7 +318,8 @@ def preprocess_for_train(image,
   image.set_shape([output_height, output_width, 3])
   image = tf.to_float(image)
   image = tf.image.random_flip_left_right(image)
-  return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
+  # return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
+  return image 
 
 
 def preprocess_for_eval(image, output_height, output_width, resize_side):
@@ -337,7 +338,8 @@ def preprocess_for_eval(image, output_height, output_width, resize_side):
   image = _central_crop([image], output_height, output_width)[0]
   image.set_shape([output_height, output_width, 3])
   image = tf.to_float(image)
-  return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
+  return image 
+  # return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
 
 
 def preprocess_image(image, output_height, output_width, is_training=False,
