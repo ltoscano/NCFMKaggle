@@ -12,12 +12,18 @@ slim = tf.contrib.slim
 _FILE_PATTERN = 'fishy_%s_*.tfrecord'
 
 _SETSPLIT_SIZES = {
-    'train/train': 3022,
-    'train/val': 755,
-    'test_stg1/test': 1000
+    'fold0': 756,
+    'fold1': 756,
+    'fold2': 755,
+    'fold3': 755,
+    'fold4': 755,
+    'test': 1000
 }
 
 _NUM_CLASSES = 8
+
+_NUM_SHARDS = 5
+_NUM_FOLD = 5
 
 _ITEMS_TO_DESCRIPTIONS = {
     'image': 'A color image of varying size.',
@@ -26,7 +32,7 @@ _ITEMS_TO_DESCRIPTIONS = {
 
 _LABELS_FILENAME = 'label2class.txt'
 
-def get_dataset(split_name, dataset_dir):
+def get_dataset(split_name, fold_num, dataset_dir):
 
     keys_to_features = {
         'image/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
@@ -50,13 +56,29 @@ def get_dataset(split_name, dataset_dir):
     decoder = slim.tfexample_decoder.TFExampleDecoder(keys_to_features, items_to_handlers)
 
     file_pattern = os.path.join(dataset_dir, _FILE_PATTERN % split_name)
-    dataset_name = os.path.basename(dataset_dir)
+    if split_name == 'train':
+        train_fold_names = ['fold%d' % i for i in range(_NUM_FOLD) if i != fold_num]
+        file_pattern = [os.path.join(dataset_dir, _FILE_PATTERN % fold_name) for fold_name in train_fold_names]
+        num_samples = sum([_SETSPLIT_SIZES[key] for key in _SETSPLIT_SIZES.keys() if key in train_fold_names])
+    elif split_name == 'val':
+        fold_name = 'fold%d' % fold_num
+        file_pattern = os.path.join(dataset_dir, _FILE_PATTERN % fold_name) 
+        num_samples = _SETSPLIT_SIZES[fold_name]
+    else:
+        file_pattern = os.path.join(dataset_dir, _FILE_PATTERN % split_name)
+        num_samples = _SETSPLIT_SIZES[split_name]
 
     return slim.dataset.Dataset(
         data_sources=file_pattern,
         reader=tf.TFRecordReader,
         decoder=decoder,
-        num_samples=_SETSPLIT_SIZES['{}/{}'.format(dataset_name, split_name)],
+        num_samples=num_samples,
         items_to_descriptions=_ITEMS_TO_DESCRIPTIONS,
         num_classes=_NUM_CLASSES,
         **extra_dataset_args)
+
+if __name__ == '__main__':
+    data_dir = '/scratch/cluster/vsub/ssayed/NCFMKaggle/data/train/cv/'
+    split_name = 'val'
+    fold_num = 1
+    get_dataset(split_name, fold_num, data_dir)

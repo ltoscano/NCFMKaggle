@@ -16,7 +16,7 @@ _SPLIT_NAMES = {
 }
 
 # The number of images in the validation set.
-_VAL_SPLIT = .2
+_NUM_FOLD = 5
 
 # Seed for repeatability.
 _RANDOM_SEED = 42
@@ -76,7 +76,7 @@ def _get_dataset_filename(dataset_dir, split_name, shard_id):
     return os.path.join(dataset_dir, output_filename)
 
 
-def _convert_dataset(split_name, filenames, dataset_dir, class2id=None):
+def _convert_dataset(split_name, filenames, dataset_dir, save_dir, class2id=None):
     """Converts the given filenames to a TFRecord dataset.
     Args:
       split_name: The name of the dataset, either 'train' or 'validation'.
@@ -94,8 +94,7 @@ def _convert_dataset(split_name, filenames, dataset_dir, class2id=None):
       with tf.Session('') as sess:
 
         for shard_id in range(_NUM_SHARDS):
-          output_filename = _get_dataset_filename(
-              dataset_dir, split_name, shard_id)
+          output_filename = _get_dataset_filename(save_dir, split_name, shard_id)
 
           with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
             start_ndx = shard_id * num_per_shard
@@ -131,24 +130,18 @@ def _dataset_exists(dataset_dir, split_names):
           return False
     return True
 
-def print_split_stats(train_filenames, val_filenames, class2label):
-    print('{} TRAIN -- {} VAL\n'.format(len(train_filenames), len(val_filenames)))
-    import numpy as np 
-
+def print_fold_stats(fold_filename_list, class2label):
     num_classes = len(class2label.keys())
-    train_dist = np.zeros(num_classes)
-    for filename in train_filenames:
-        train_dist[class2label[class_from_filename(filename)]] += 1
-    print('TRAIN DIST: \n')
-    print(train_dist / len(train_filenames))
 
-    val_dist = np.zeros(num_classes)
-    for filename in val_filenames:
-        val_dist[class2label[class_from_filename(filename)]] += 1
-    print('VAL DIST: \n')
-    print(val_dist / len(val_filenames))
+    import numpy as np 
+    for fold in range(_NUM_FOLD):
+        print('FOLD %d -- %d images.' % (fold, len(fold_filename_list[fold])))
+        dist = np.zeros(num_classes)
+        for filename in fold_filename_list[fold]:
+            dist[class2label[class_from_filename(filename)]] += 1
+        print(dist/len(fold_filename_list[fold]))
 
-def run(dataset_dir, dataset='train'):
+def run(dataset_dir, save_dir, dataset='train'):
     """Runs the download and conversion operation.
     Args:
       dataset_dir: The dataset directory where the dataset is stored.
@@ -158,34 +151,32 @@ def run(dataset_dir, dataset='train'):
     if not tf.gfile.Exists(dataset_dir):
       tf.gfile.MakeDirs(dataset_dir)
 
-    split_names = _SPLIT_NAMES[dataset]
+    # split_names = _SPLIT_NAMES[dataset]
 
-    if _dataset_exists(dataset_dir, split_names):
-      print('Dataset files already exist. Exiting without re-creating them.')
-      return
+    # if _dataset_exists(dataset_dir, split_names):
+    #   print('Dataset files already exist. Exiting without re-creating them.')
+    #   return
 
     if dataset == 'train':
         photo_filenames, class_names = _get_filenames_and_classes(dataset_dir)
         class2label = dict(zip(class_names, range(len(class_names))))
 
-        # number of validation examples
-        num_val = int(_VAL_SPLIT*len(photo_filenames))
-
         # Divide into train and test:
         random.seed(_RANDOM_SEED)
         random.shuffle(photo_filenames)
-        train_filenames = photo_filenames[num_val:]
-        val_filenames = photo_filenames[:num_val]
 
-        # First, convert the training and validation sets.
-        _convert_dataset('train', train_filenames, dataset_dir, class2label)
-        _convert_dataset('val', val_filenames, dataset_dir, class2label)
+        file_name_folds = split(photo_filenames, _NUM_FOLD)
+        print_fold_stats(file_name_folds, class2label)
 
-        print_split_stats(train_filenames, val_filenames, class2label)
+        # convert the datasets 
+        for fold in range(_NUM_FOLD):
+            _convert_dataset('fold%d' % (fold), file_name_folds[fold], dataset_dir, save_dir, class2label)
+        # _convert_dataset('train', train_filenames, dataset_dir, class2label)
+        # _convert_dataset('val', val_filenames, dataset_dir, class2label)
 
         # Finally, write the labels file:
         label2class = dict(zip(range(len(class_names)), class_names))
-        utils.write_labels_file(labels2class, dataset_dir)
+        utils.write_label_file(label2class, save_dir)
         
     else:
         test_filenames = []
@@ -195,9 +186,12 @@ def run(dataset_dir, dataset='train'):
         print('{} TEST'.format(len(test_filenames)))
         _convert_dataset('test', test_filenames, dataset_dir)
 
-    dataset_name = os.path.basename(dataset_dir)
-    print('Finished converting {} dataset to TFRecord {} split(s).\n'.format(dataset_name, '/'.join(split_names)))
+    # dataset_name = os.path.basename(dataset_dir)
+    # print('Finished converting {} dataset to TFRecord {} split(s).\n'.format(dataset_name, '/'.join(split_names)))
 
+def split(a, n):
+    k, m = divmod(len(a), n)
+    return [a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in xrange(n)]
 
 def int64_feature(values):
     if not isinstance(values, (tuple, list)):
@@ -224,4 +218,6 @@ def image_to_tfexample(image_data, image_format, class_id=None, image_id=None):
     return tf.train.Example(features=tf.train.Features(feature=feature_dict))
 
 if __name__ == '__main__':
-    run('/scratch/cluster/vsub/ssayed/NCFMKaggle/data/test_stg1', dataset='test')
+    data_dir = '/scratch/cluster/vsub/ssayed/NCFMKaggle/data/train/raw/'
+    save_dir = '/scratch/cluster/vsub/ssayed/NCFMKaggle/data/train/cv/'
+    run(data_dir, save_dir, dataset='train')

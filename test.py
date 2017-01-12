@@ -2,12 +2,10 @@ import tensorflow as tf
 import argparse 
 import os 
 import csv 
-
-from misc.DataLoader import DataLoader 
+import numpy as np 
 
 slim = tf.contrib.slim
 
-from nets import nets_factory
 from preprocessing import preprocessing_factory as prepro
 from datasets import dataloader 
 
@@ -49,7 +47,8 @@ def model(inputs, num_classes=8, is_training=True, dropout_keep_prob=0.5, spatia
             end_points[sc.name + '/fc8'] = net
         return net, end_points
 
-def create_input_pipeline(dataset, prepro_fn, im_size, batch_size):
+def create_input_pipeline(dataset, prepro_fn, batch_size):
+    im_size = 224
     with tf.device('/cpu:0'):
         # setup training input pipeline 
         provider = slim.dataset_data_provider.DatasetDataProvider(dataset,
@@ -64,70 +63,80 @@ def create_input_pipeline(dataset, prepro_fn, im_size, batch_size):
                                             allow_smaller_final_batch=True)
     return images, image_ids
 
-def test_net(args):
+def create_test_graph(args, fold_num):
 
-    global_step = slim.create_global_step()
-    im_size = 224 
+    global_step = slim.get_or_create_global_step()
 
-    # get dataset, setup batch queue
-    test_set = dataloader.get_dataset('test', args.data_dir) 
+    test_set = dataloader.get_dataset('test', fold_num, args.data_dir) 
+
     prepro_fn = prepro.get_preprocessing('vgg_16', is_training=False)
-    test_images, test_image_ids = create_input_pipeline(test_set, prepro_fn, im_size, args.batch_size)
 
-    # create networks
-    # network_fn = nets_factory.get_network_fn('vgg_16', num_classes=8, is_training=False, finetune=False)
+    test_images, test_image_ids = create_input_pipeline(test_set, prepro_fn, args.batch_size)
 
     logits, end_points = model(test_images, is_training=False)
     softmax = tf.nn.softmax(logits)
 
-    # initialize variables from start file 
-    restore_vars = slim.get_model_variables()
-    init_fn = slim.assign_from_checkpoint_fn(args.start_from, restore_vars, ignore_missing_vars=True)
+    return softmax, test_image_ids, test_set.num_samples
 
-    init_op = tf.global_variables_initializer()
-    local_init_op = tf.local_variables_initializer()
-    with tf.Session() as sess:
-        sess.run(init_op)
-        sess.run(local_init_op)
-        init_fn(sess)
+def test_net(args):
 
-        coord = tf.train.Coordinator()
-        threads = tf.train.start_queue_runners(coord=coord)
+    ids_to_probs = {}
+    for fold in range(5):
+        tf.reset_default_graph()
 
-        num_eval = 0
-        test_probs = []
-        test_ids = []
-        while num_eval < test_set.num_samples:
-            probs, image_ids = sess.run([softmax, test_image_ids])
-            num_eval += len(probs)
-            print('{}/{}'.format(num_eval, test_set.num_samples))
-            test_probs += list(probs)
-            test_ids += list(image_ids)
-    
-        coord.request_stop()
-        coord.join(threads)
-        sess.close()
+        softmax, test_image_ids, num_test_samples = create_test_graph(args, fold)
+
+        restore_vars = slim.get_model_variables()
+        load_file = os.path.join(args.start_from, 'fold%d/best/model' % fold)
+        init_fn = slim.assign_from_checkpoint_fn(load_file, restore_vars, ignore_missing_vars=True)
+
+        init_op = tf.global_variables_initializer()
+        local_init_op = tf.local_variables_initializer()
+        with tf.Session() as sess:
+            sess.run(init_op)
+            sess.run(local_init_op)
+            init_fn(sess)
+
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(coord=coord)
+
+            num_eval = 0
+            test_probs = []
+            test_ids = []
+            while num_eval < num_test_samples:
+                image_ids, probs = sess.run([test_image_ids, softmax])
+                num_eval += len(probs)
+                print('{}/{}'.format(num_eval, num_test_samples))
+                test_probs += list(probs)
+                test_ids += list(image_ids)
+
+            for i, _id in enumerate(test_ids):
+                if _id in ids_to_probs:
+                    ids_to_probs[_id].append(np.copy(test_probs[i]))
+                else:
+                    ids_to_probs[_id] = [np.copy(test_probs[i])]
+        
+            coord.request_stop()
+            coord.join(threads)
+            sess.close()
 
     with open('probs.csv', 'wb') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
         writer.writerow(['image', 'ALB', 'BET', 'DOL', 'LAG', 'NoF', 'OTHER', 'SHARK', 'YFT'])
-        for img_name, probs in zip(test_ids, test_probs):
-            writer.writerow([img_name] + list(probs))
+        for img_name, probs in ids_to_probs.items():
+            writer.writerow([img_name] + list(np.mean(probs, axis=0)))
+        # for img_name, probs in zip(test_ids, test_probs):
+        #     writer.writerow([img_name] + list(probs))
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='train a model')
 
     parser.add_argument('-data_dir', type=str, default='/scratch/cluster/vsub/ssayed/NCFMKaggle/data/test_stg1', dest='data_dir')
-    parser.add_argument('-start_from', type=str, default='/scratch/cluster/vsub/ssayed/NCFMKaggle/checkpoints/model.ckpt', dest='start_from')
+    parser.add_argument('-start_from', type=str, default='/scratch/cluster/vsub/ssayed/NCFMKaggle/checkpoints/cv/', dest='start_from')
 
     parser.add_argument('-batch_size', type=int, default=64, dest='batch_size')
     parser.add_argument('-lr', type=float, default=3e-4, dest='lr')
-    parser.add_argument('-finetune', action='store_true', help='finetune cnn')
-
-    # parser.add_argument('-save_name', type=str, default='linear-r1', dest='save_name')
-    # parser.add_argument('-save_folder', type=str, default='/scratch/cluster/vsub/ssayed/NCFMKaggle/checkpoints', dest='save_folder')
-    # parser.add_argument('-save_every', type=int, default=50, dest='save_every')
 
     args = parser.parse_args()
     test_net(args)
