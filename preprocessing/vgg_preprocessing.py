@@ -45,6 +45,7 @@ _B_MEAN = 103.94
 _RESIZE_SIDE_MIN = 256
 _RESIZE_SIDE_MAX = 256
 
+_NUM_TEST_CROPS = 64
 
 def _crop(image, offset_height, offset_width, crop_height, crop_width):
   """Crops the given image using the provided offsets and sizes.
@@ -335,10 +336,14 @@ def preprocess_for_eval(image, output_height, output_width, resize_side):
     A preprocessed image.
   """
   image = _aspect_preserving_resize(image, resize_side)
-  image = _central_crop([image], output_height, output_width)[0]
-  image.set_shape([output_height, output_width, 3])
-  image = tf.to_float(image)
-  return image 
+  random_crops = []
+  for i in range(_NUM_TEST_CROPS):
+    cropped_image = _random_crop([image], output_height, output_width)[0]
+    cropped_image.set_shape([output_height, output_width, 3])
+    cropped_image = tf.to_float(cropped_image)
+    random_crops.append(cropped_image)
+  random_crops_tensor = tf.pack(random_crops)
+  return random_crops_tensor 
   # return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
 
 

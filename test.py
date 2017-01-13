@@ -47,7 +47,7 @@ def model(inputs, num_classes=8, is_training=True, dropout_keep_prob=0.5, spatia
             end_points[sc.name + '/fc8'] = net
         return net, end_points
 
-def create_input_pipeline(dataset, prepro_fn, batch_size):
+def create_input_pipeline(dataset, prepro_fn, batch_size=10):
     im_size = 224
     with tf.device('/cpu:0'):
         # setup training input pipeline 
@@ -57,11 +57,10 @@ def create_input_pipeline(dataset, prepro_fn, batch_size):
           num_epochs=1)
         [image, image_id] = provider.get(['image', 'id'])
 
-        image = prepro_fn(image, im_size, im_size)
+        image_crops = prepro_fn(image, im_size, im_size)
 
-        images, image_ids = tf.train.batch([image, image_id], batch_size=batch_size, num_threads=4, capacity=10*batch_size,
-                                            allow_smaller_final_batch=True)
-    return images, image_ids
+        # images = tf.train.batch([image_crops], batch_size=batch_size, num_threads=4, capacity=10*batch_size)
+    return image_crops, image_id
 
 def create_test_graph(args, fold_num):
 
@@ -71,7 +70,7 @@ def create_test_graph(args, fold_num):
 
     prepro_fn = prepro.get_preprocessing('vgg_16', is_training=False)
 
-    test_images, test_image_ids = create_input_pipeline(test_set, prepro_fn, args.batch_size)
+    test_images, test_image_ids = create_input_pipeline(test_set, prepro_fn)
 
     logits, end_points = model(test_images, is_training=False)
     softmax = tf.nn.softmax(logits)
@@ -105,10 +104,11 @@ def test_net(args):
             test_ids = []
             while num_eval < num_test_samples:
                 image_ids, probs = sess.run([test_image_ids, softmax])
-                num_eval += len(probs)
+                num_eval += 1
                 print('{}/{}'.format(num_eval, num_test_samples))
-                test_probs += list(probs)
-                test_ids += list(image_ids)
+                mean_prob = np.mean(probs, axis=0)
+                test_probs += [mean_prob]
+                test_ids += [image_ids]
 
             for i, _id in enumerate(test_ids):
                 if _id in ids_to_probs:
